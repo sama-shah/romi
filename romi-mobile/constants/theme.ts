@@ -12,19 +12,20 @@ export const Colors = {
   light: {
     text: '#11181C',
     background: '#fff',
-    tint: tintColorLight,
+    tint: '#EB94A7',
     icon: '#687076',
     tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    tabIconSelected: '#EB94A7',
   },
   dark: {
     text: '#ECEDEE',
     background: '#151718',
-    tint: tintColorDark,
+    tint: '#EB94A7',
     icon: '#9BA1A6',
     tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    tabIconSelected: '#EB94A7',
   },
+
 };
 
 export const Fonts = Platform.select({
