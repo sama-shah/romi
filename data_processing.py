@@ -3,6 +3,11 @@ import ast
 import matplotlib.pyplot as plt
 from datetime import date
 
+FOLLICULAR = 0
+LUTEAL = 1
+MENSES = 2
+OVULATION = 3
+
 # Applies a low pass filter to smooth data with a window size of n
 def low_pass(data, window_size=3):
     newData = []
@@ -74,20 +79,13 @@ def str_to_date(string):
 def phase_from_date(phases, date):
     return phases[date.strftime('%Y-%m-%d')]
 
-def main():
+# Loads date, minHR, and BBT
+def load_raw_data():
     data = pd.read_csv("raw_data/sleep_2024-03-22_2025-09-16.csv")
     dates = data['day'].apply(str_to_date).to_list()
     minHeartRateData = remove_nan(data['lowest_heart_rate']).to_list()
     data = data['readiness']
 
-    df = pd.read_csv("calendar_data_full.csv")
-    phases = df.set_index('day')['phase']
-    print(phases["2024-01-06"])
-    print(dates[12])
-    print(phases["2024-03-23"])
-    print(phases[dates[12].strftime('%Y-%m-%d')])
-    print(phase_from_date(phases, dates[12]))
-    
     tempData = []
     for entry in data:
         try:
@@ -104,17 +102,82 @@ def main():
                 print("Found non string")
         except:
             print("uh oh")
+    
+    return dates, tempData, minHeartRateData
 
+def load_truth_map():
+    # Load the truth values and produce a mapping from date to annotation
+    truth_data = pd.read_csv("calendar_data_full_annotated.csv")
+    truthMapping = {}
+
+    for date, label in zip(truth_data['day'], truth_data['phase']):
+        truthMapping[str_to_date(date)] = label
+
+    return truthMapping
+
+def compute_accuracy(labels: list, luteal_preds: set):
+    total_correct = 0
+    total_missing = 0
+
+    for i in range(len(labels)):
+        if labels[i] == 'missing':
+            total_missing += 1
+        elif labels[i] == 'luteal' or labels[i] == 'ovulations':
+            if i in luteal_preds:
+                total_correct += 1
+        elif not(i in luteal_preds): # Not in preds means correct pred follicular
+            total_correct += 1
+
+    print(f"Out of {len(labels)} labels, {total_missing} are missing")
+    return total_correct / (len(labels) - total_missing)
+        
+def main():
+    # Load data
+    dates, tempData, minHeartRateData = load_raw_data()
+    truthMapping = load_truth_map()
+
+    # Compute label aligned with date
+    labels = []
+    for date in dates:
+        try:
+            labels.append(truthMapping[date])
+        except:
+            print(f"Missing {date}")
+            labels.append("missing")
+
+    # Smooth data
     smoothed_temp_data = low_pass(tempData, window_size=3)
     smoothed_hr_data = low_pass(minHeartRateData, window_size=3)
-    # plot_curve_pairs(smoothed_temp_data[:200], smoothed_hr_data[:200], 'temp', 'hr')
 
-    PLOT_WINDOW_START = 100
-    PLOT_WINDOW_END = 200
+    # Generate predictions from data, classify spikes as luteal phase
+    PLOT_WINDOW_START = 0
+    PLOT_WINDOW_END = len(labels)
     smoothed_temp_data = smoothed_temp_data[PLOT_WINDOW_START:PLOT_WINDOW_END]
     smoothed_hr_data = smoothed_hr_data[PLOT_WINDOW_START:PLOT_WINDOW_END]
     temp_spike_indices = identify_windowed_spikes(smoothed_temp_data, n=14)
     hr_spike_indices = identify_windowed_spikes(smoothed_hr_data, n=14)
+
+    combined_sets = set(temp_spike_indices).union(set(hr_spike_indices))
+
+    # Compute accuracy
+    # accuracy = compute_accuracy(labels, combined_sets)
+    accuracy = compute_accuracy(labels, set(temp_spike_indices))
+
+    print(f"Accuracy is f{accuracy}")
+    return
+
+    # df = pd.read_csv("calendar_data_full.csv")
+    # phases = df.set_index('day')['phase']
+    # print(phases["2024-01-06"])
+    # print(dates[12])
+    # print(phases["2024-03-23"])
+    # print(phases[dates[12].strftime('%Y-%m-%d')])
+    # print(phase_from_date(phases, dates[12]))
+    
+    breakpoint()
+
+
+    # plot_curve_pairs(smoothed_temp_data[:200], smoothed_hr_data[:200], 'temp', 'hr')
 
     # Graph preds on separate graphs for comparison
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True) 
