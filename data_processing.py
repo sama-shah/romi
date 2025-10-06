@@ -71,11 +71,22 @@ def str_to_date(string):
     pieces = string.split('-')
     return date(int(pieces[0]), int(pieces[1]), int(pieces[2]))
 
+def phase_from_date(phases, date):
+    return phases[date.strftime('%Y-%m-%d')]
+
 def main():
     data = pd.read_csv("raw_data/sleep_2024-03-22_2025-09-16.csv")
     dates = data['day'].apply(str_to_date).to_list()
     minHeartRateData = remove_nan(data['lowest_heart_rate']).to_list()
     data = data['readiness']
+
+    df = pd.read_csv("calendar_data_full.csv")
+    phases = df.set_index('day')['phase']
+    print(phases["2024-01-06"])
+    print(dates[12])
+    print(phases["2024-03-23"])
+    print(phases[dates[12].strftime('%Y-%m-%d')])
+    print(phase_from_date(phases, dates[12]))
     
     tempData = []
     for entry in data:
