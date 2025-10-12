@@ -105,33 +105,7 @@ def load_raw_data():
     
     return dates, tempData, minHeartRateData
 
-def load_truth_map():
-    # Load the truth values and produce a mapping from date to annotation
-    truth_data = pd.read_csv("calendar_data_full_annotated.csv")
-    truthMapping = {}
-
-    for date, label in zip(truth_data['day'], truth_data['phase']):
-        truthMapping[str_to_date(date)] = label
-
-    return truthMapping
-
-def compute_accuracy(labels: list, luteal_preds: set):
-    total_correct = 0
-    total_missing = 0
-
-    for i in range(len(labels)):
-        if labels[i] == 'missing':
-            total_missing += 1
-        elif labels[i] == 'luteal' or labels[i] == 'ovulations':
-            if i in luteal_preds:
-                total_correct += 1
-        elif not(i in luteal_preds): # Not in preds means correct pred follicular
-            total_correct += 1
-
-    print(f"Out of {len(labels)} labels, {total_missing} are missing")
-    return total_correct / (len(labels) - total_missing)
-        
-def main():
+def load_processed_data():
     # Load data
     dates, tempData, minHeartRateData = load_raw_data()
     truthMapping = load_truth_map()
@@ -145,57 +119,52 @@ def main():
             print(f"Missing {date}")
             labels.append("missing")
 
-    # Smooth data
-    smoothed_temp_data = low_pass(tempData, window_size=3)
-    smoothed_hr_data = low_pass(minHeartRateData, window_size=3)
+    return tempData, minHeartRateData, labels
 
-    # Generate predictions from data, classify spikes as luteal phase
-    PLOT_WINDOW_START = 0
-    PLOT_WINDOW_END = len(labels)
-    smoothed_temp_data = smoothed_temp_data[PLOT_WINDOW_START:PLOT_WINDOW_END]
-    smoothed_hr_data = smoothed_hr_data[PLOT_WINDOW_START:PLOT_WINDOW_END]
-    temp_spike_indices = identify_windowed_spikes(smoothed_temp_data, n=14)
-    hr_spike_indices = identify_windowed_spikes(smoothed_hr_data, n=14)
+def load_truth_map():
+    # Load the truth values and produce a mapping from date to annotation
+    truth_data = pd.read_csv("calendar_data_full_annotated.csv")
+    truthMapping = {}
 
-    combined_sets = set(temp_spike_indices).union(set(hr_spike_indices))
+    for date, label in zip(truth_data['day'], truth_data['phase']):
+        truthMapping[str_to_date(date)] = label
 
-    # Compute accuracy
-    # accuracy = compute_accuracy(labels, combined_sets)
-    accuracy = compute_accuracy(labels, set(temp_spike_indices))
+    return truthMapping
 
-    print(f"Accuracy is f{accuracy}")
-    return
+def compute_accuracy(labels: list, luteal_preds: set, warmup_period=0):
+    total_correct = 0
+    total_missing = 0
 
-    # df = pd.read_csv("calendar_data_full.csv")
-    # phases = df.set_index('day')['phase']
-    # print(phases["2024-01-06"])
-    # print(dates[12])
-    # print(phases["2024-03-23"])
-    # print(phases[dates[12].strftime('%Y-%m-%d')])
-    # print(phase_from_date(phases, dates[12]))
-    
-    breakpoint()
+    for i in range(warmup_period, len(labels)):
+        if labels[i] == 'missing':
+            total_missing += 1
+        elif labels[i] == 'luteal' or labels[i] == 'ovulations':
+            if i in luteal_preds:
+                total_correct += 1
+        elif not(i in luteal_preds): # Not in preds means correct pred follicular
+            total_correct += 1
 
+    print(f"Out of {len(labels)} labels, {total_missing} are missing")
+    return total_correct / (len(labels) - total_missing - warmup_period), total_correct, (len(labels) - total_missing - warmup_period)
 
-    # plot_curve_pairs(smoothed_temp_data[:200], smoothed_hr_data[:200], 'temp', 'hr')
-
+def graph_stacked_with_highlights(data0, spikes0, data1, spikes1, data0Name='data0', data1Name='data1'):
     # Graph preds on separate graphs for comparison
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True) 
 
     # Plot on the first (top) subplot
-    ax1.plot(smoothed_temp_data, color='blue')
-    ax1.set_title('BBT pred')
-    ax1.set_ylabel('temp')
+    ax1.plot(data0, color='blue')
+    ax1.set_title(data0Name)
+    # ax1.set_ylabel('temp')
 
-    for spike in temp_spike_indices:
+    for spike in spikes0:
         ax1.axvline(x=spike, color='r', linestyle='-', linewidth=2)
 
     # Plot on the second (bottom) subplot
-    ax2.plot(smoothed_hr_data, color='red')
-    ax2.set_title('HR Pred')
-    ax2.set_ylabel('hr')
+    ax2.plot(data1, color='red')
+    ax2.set_title(data1Name)
+    # ax2.set_ylabel('hr')
 
-    for spike in hr_spike_indices:
+    for spike in spikes1:
         plt.axvline(x=spike, color='g', linestyle='-', linewidth=2)
 
     # Adjust layout to prevent labels from overlapping
@@ -204,8 +173,57 @@ def main():
     # Display the plot
     plt.show()
 
-    # plt.plot(smoothed_hr_data[200:300])
-    # plt.show()
+def compute_confusion_matrix(true_labels: set, pred_labels: set, total_data_size):
+    trueNegative, truePositive, falsePositive, falseNegative = [], [], [], []
+    streamedMatrix = [] # A stream of TN, TP, FP, FN values
+    for i in range(total_data_size):
+        if i in true_labels: # truePositive or falsenegative
+            if i in pred_labels:
+                truePositive.append(i)
+                streamedMatrix.append('TP')
+            else:
+                falseNegative.append(i)
+                streamedMatrix.append('FN')
+        else: # true negative or false positive
+            if i in pred_labels:
+                falsePositive.append(i)
+                streamedMatrix.append('FP')
+            else:
+                trueNegative.append(i)
+                streamedMatrix.append('TN')
+
+    return trueNegative, truePositive, falsePositive, falseNegative, streamedMatrix
+
+def compute_spiked_prediction_accuracy(data, labels, window_size=14, visualize=True):
+    # Smooth data for predictions
+    smoothed_data = low_pass(data, window_size=3)
+
+    # Generate predictions from data, classify spikes as luteal phase
+    spike_indices = identify_windowed_spikes(smoothed_data, n=window_size)
+
+    # Compute accuracy
+    accuracy, total_correct, total_considered = compute_accuracy(labels, set(spike_indices), warmup_period=window_size)
+    print(f"Accuracy is f{accuracy}")
+
+    # Visualize predictions versus truth
+    if visualize:
+        true_spikes = []
+        for i in range(window_size, len(labels)):
+            if labels[i] == 'luteal' or labels[i] == 'ovulation':
+                true_spikes.append(i)
+
+        graph_stacked_with_highlights(smoothed_data, spike_indices, smoothed_data, true_spikes, data0Name='preds', data1Name='true_label')
+
+    # Extract confusion matrix metrics
+    # trueNegative, truePositive, falsePositive, falseNegative, streamedMatrix = compute_confusion_matrix(set(true_spikes), temp_spike_indices, total_data_size=len(labels))
+
+    return accuracy, total_correct, total_considered
+
+def main():
+    # Load data
+    tempData, minHeartRateData, labels = load_processed_data()
+    accuracy, total_correct, total_considered = compute_spiked_prediction_accuracy(tempData, labels, visualize=True)
+    breakpoint()
 
 if __name__ == '__main__':
     main()
