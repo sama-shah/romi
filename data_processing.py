@@ -47,6 +47,95 @@ def identify_windowed_spikes(data, n=14):
 
     return spike_indices
 
+def identify_weighted_windowed_spikes(data, n=14):
+    windowed_sum = sum(data[:n])
+    spike_indices = []
+    current_run_size = n # Tracking the length of the current run
+                         # Used to incentize runs around the window length
+    spiked_run = False
+
+    for i in range(n, len(data)):
+        # Percentage of the elapsed target window
+        # TODO: instead of linear scaling of weight, experiment with harmonic or exponential
+        run_weight = current_run_size / n
+
+        # If in a spiked run, invert run weight to lower the threshold to stop the run
+        if spiked_run:
+            run_weight = run_weight
+        else:
+            run_weight = 2 - run_weight
+
+        # Debug
+        # print(f"Spiked_run={spiked_run}, current_run_size={current_run_size}, run_weight={run_weight}")
+        # print(f"Comparing data={data[i]} with {(run_weight * (windowed_sum / n))}")
+
+        # Check if you exceed the past window average
+        if data[i] > (run_weight * (windowed_sum / n)):
+            if not spiked_run:
+                spiked_run = True
+                current_run_size = 0
+            spike_indices.append(i)
+        elif spiked_run:
+            spiked_run = False
+            current_run_size = 0
+
+        # Adjust the windowed sum to remove the previous and add yourself
+        windowed_sum += data[i] - data[i - n]
+
+        current_run_size += 1
+
+    return spike_indices
+
+def period_adjusting_identify_weighted_windowed_spikes(data, labels, n=14):
+    windowed_sum = sum(data[:n])
+    spike_indices = []
+    spiked_run = False
+    
+    # Estimate run size from the first windows days of data
+    if 'period' in labels[:n]:
+        current_run_size = n - labels.index('period')
+    else:
+        current_run_size = n # Tracking the length of the current run
+                        # Used to incentize runs around the window length
+
+    for i in range(n, len(data)):
+        # Percentage of the elapsed target window
+        # TODO: instead of linear scaling of weight, experiment with harmonic or exponential
+        run_weight = current_run_size / n
+
+        # If in a spiked run, invert run weight to lower the threshold to stop the run
+        if spiked_run:
+            run_weight = run_weight
+        else:
+            run_weight = 2 - run_weight
+
+        # Debug
+        # print(f"Spiked_run={spiked_run}, current_run_size={current_run_size}, run_weight={run_weight}")
+        # print(f"Comparing data={data[i]} with {(run_weight * (windowed_sum / n))}")
+
+        # Check if you exceed the past window average
+        if data[i] > (run_weight * (windowed_sum / n)):
+            if not spiked_run:
+                spiked_run = True
+                current_run_size = 0
+            spike_indices.append(i)
+        elif spiked_run:
+            spiked_run = False
+            current_run_size = 0
+
+        # Adjust the windowed sum to remove the previous and add yourself
+        windowed_sum += data[i] - data[i - n]
+
+        current_run_size += 1
+
+        # Recalibrate if you recieve a reported period which you didn't account for
+        # if labels[i-1] != 'period' and labels[i] == 'period' or  and spiked_run:
+        if labels[i-1] != 'period' and labels[i] == 'period':
+            current_run_size = 1
+            spiked_run = False
+
+    return spike_indices
+
 def plot_curve_pairs(data1, data2, label1, label2):
     # Create the first plot with the left y-axis
     fig, ax1 = plt.subplots()
@@ -219,10 +308,56 @@ def compute_spiked_prediction_accuracy(data, labels, window_size=14, visualize=T
 
     return accuracy, total_correct, total_considered
 
+def compute_weighted_window_spiked_prediction_accuracy(data, labels, window_size=14, visualize=True):
+    # Smooth data for predictions
+    smoothed_data = low_pass(data, window_size=3)
+
+    # Generate predictions from data, classify spikes as luteal phase
+    spike_indices = identify_weighted_windowed_spikes(smoothed_data, n=window_size)
+
+    # Compute accuracy
+    accuracy, total_correct, total_considered = compute_accuracy(labels, set(spike_indices), warmup_period=window_size)
+    print(f"Accuracy is f{accuracy}")
+
+    # Visualize predictions versus truth
+    if visualize:
+        true_spikes = []
+        for i in range(window_size, len(labels)):
+            if labels[i] == 'luteal' or labels[i] == 'ovulation':
+                true_spikes.append(i)
+
+        graph_stacked_with_highlights(smoothed_data, spike_indices, smoothed_data, true_spikes, data0Name='preds', data1Name='true_label')
+
+    return accuracy, total_correct, total_considered 
+
+def compute_weighted_window_period_adjusting_spiked_prediction_accuracy(data, labels, window_size=14, visualize=True):
+    # Smooth data for predictions
+    smoothed_data = low_pass(data, window_size=3)
+
+    # Generate predictions from data, classify spikes as luteal phase
+    spike_indices = period_adjusting_identify_weighted_windowed_spikes(smoothed_data, labels, n=window_size)
+
+    # Compute accuracy
+    accuracy, total_correct, total_considered = compute_accuracy(labels, set(spike_indices), warmup_period=window_size)
+    print(f"Accuracy is f{accuracy}")
+
+    # Visualize predictions versus truth
+    if visualize:
+        true_spikes = []
+        for i in range(window_size, len(labels)):
+            if labels[i] == 'luteal' or labels[i] == 'ovulation':
+                true_spikes.append(i)
+
+        graph_stacked_with_highlights(smoothed_data, spike_indices, smoothed_data, true_spikes, data0Name='preds', data1Name='true_label')
+
+    return accuracy, total_correct, total_considered 
+
 def main():
     # Load data
     tempData, minHeartRateData, labels = load_processed_data()
-    accuracy, total_correct, total_considered = compute_spiked_prediction_accuracy(tempData, labels, visualize=True)
+    # breakpoint()
+    # accuracy, total_correct, total_considered = compute_weighted_window_spiked_prediction_accuracy(tempData, labels, visualize=True)
+    accuracy, total_correct, total_considered = compute_weighted_window_period_adjusting_spiked_prediction_accuracy(tempData, labels, visualize=True)
     breakpoint()
 
 if __name__ == '__main__':
