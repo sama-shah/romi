@@ -17,6 +17,7 @@ def load_processed_data(
 
     allParticipants = set(data['id'].to_list())
 
+    # Replace labels to only have luteal, period, follicular, ovulation
     for participant in allParticipants:
         participant_mask = data['id'] == participant
         tempDataPerParticipant[participant] = data['basal_body_temperature'][participant_mask].to_list()
@@ -24,11 +25,11 @@ def load_processed_data(
         labelsPerParticipant[participant] = data['phase'][participant_mask]
         labelsPerParticipant[participant] = labelsPerParticipant[participant].replace('Luteal', 'luteal')
         labelsPerParticipant[participant] = labelsPerParticipant[participant].replace('Menstrual', 'period')
-        labelsPerParticipant[participant] = labelsPerParticipant[participant].replace('Fertility', 'follicular') # For now assume all fertile periods 
+        labelsPerParticipant[participant] = labelsPerParticipant[participant].replace('Fertility', 'follicular') # For now assume all fertile periods are follicular
         labelsPerParticipant[participant] = labelsPerParticipant[participant].replace('Follicular', 'follicular')
         labelsPerParticipant[participant] = labelsPerParticipant[participant].to_list()
 
-    # Replace labels to only have luteal, period, follicular, ovulation
+    
     # breakpoint()
 
     return tempDataPerParticipant, minHeartRatePerParticipant, labelsPerParticipant
@@ -48,7 +49,7 @@ def main():
     # breakpoint()
 
     accuracies = []
-
+    breakpoint()
     total_skipped = 0
     for participant in tempData.keys():
         # if 'period' in labels[participant]:
