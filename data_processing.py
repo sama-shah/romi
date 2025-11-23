@@ -10,6 +10,8 @@ OVULATION = 3
 
 FERTILE_DAYS_BEFORE_LUTEAL  = 6 # Ends in ovulation day
 FERTILE_DAYS_DURING_LUTEAL  = 3 # After ovulation day
+PERIOD_LENGTH_DAYS = 5
+OUVLATION_FORGIVENESS_WINDOW_DAYS = 3
 
 # Applies a low pass filter to smooth data with a window size of n
 def low_pass(data, window_size=3):
@@ -144,6 +146,7 @@ def period_adjusting_identify_weighted_windowed_spikes(data, labels, n=14):
     spike_indices = []
     ovulation_indices = []
     fertility_indices = []
+    period_indices = []
     spiked_run = False
     
     # Estimate run size from the first windows days of data
@@ -178,6 +181,8 @@ def period_adjusting_identify_weighted_windowed_spikes(data, labels, n=14):
             spike_indices.append(i)
         elif spiked_run:
             spiked_run = False
+            for j in range(PERIOD_LENGTH_DAYS):
+                period_indices.append(i + j)
             current_run_size = 0
 
         # Adjust the windowed sum to remove the previous and add yourself
@@ -191,7 +196,7 @@ def period_adjusting_identify_weighted_windowed_spikes(data, labels, n=14):
             current_run_size = 1
             spiked_run = False
     # breakpoint() 
-    return ovulation_indices, fertility_indices, spike_indices
+    return ovulation_indices, fertility_indices, spike_indices, period_indices
 
 def plot_curve_pairs(data1, data2, label1, label2):
     # Create the first plot with the left y-axis
@@ -298,11 +303,14 @@ def compute_ovulation_accuracy(labels: list, ovulation_preds: set, warmup_period
     total_missing = 0
 
     for i in ovulation_preds:
-        if labels[i] == 'ovulation':
-           total_correct += 1
+        # Go over all values in the window and check if any of them are ovulation
+        for j in range(i - OUVLATION_FORGIVENESS_WINDOW_DAYS, i + OUVLATION_FORGIVENESS_WINDOW_DAYS + 1):
+            if labels[j] == 'ovulation':
+                total_correct += 1
+                break
         
     total_considered = labels[warmup_period:].count('ovulation')
-
+    
     return total_correct / total_considered, total_correct, total_considered
 
 def compute_fertility_accuracy(labels: list, fertility_preds: set, warmup_period=0):
@@ -435,7 +443,7 @@ def compute_weighted_window_period_adjusting_spiked_prediction_accuracy(data, la
     return accuracy, total_correct, total_considered 
 
 # Creates labeled data from generated labels
-def create_generated_labels(num_data_points, ovulation_indices, fertility_indices, spike_indices):
+def create_generated_labels(num_data_points, ovulation_indices, fertility_indices, spike_indices, period_indices):
     generated_labels = []
     for i in range(num_data_points):
         if i in ovulation_indices:
@@ -444,6 +452,8 @@ def create_generated_labels(num_data_points, ovulation_indices, fertility_indice
             generated_labels.append('fertile')
         elif i in spike_indices:
             generated_labels.append('luteal')
+        elif i in period_indices:
+            generated_labels.append('period')
         else:
             generated_labels.append('follicular')
     return generated_labels
@@ -460,7 +470,7 @@ def compute_weighted_window_period_adjusting_spiked_prediction_with_ovulation_ac
     smoothed_data = low_pass(data, window_size=3)
 
     # Generate predictions from data, classify spikes as luteal phase
-    ovulation_indices, fertility_indices, spike_indices = period_adjusting_identify_weighted_windowed_spikes(smoothed_data, labels, n=window_size)
+    ovulation_indices, fertility_indices, spike_indices, period_indices = period_adjusting_identify_weighted_windowed_spikes(smoothed_data, labels, n=window_size)
 
     # Compute ovulation distances
     ovulation_distances = []
@@ -472,23 +482,23 @@ def compute_weighted_window_period_adjusting_spiked_prediction_with_ovulation_ac
                 min_distance = abs(ovulation_true_indices[j] - ovulation_indices[i])
         ovulation_distances.append(min_distance)
 
-    generated_labels = create_generated_labels(len(labels), ovulation_indices, fertility_indices, spike_indices)
+    generated_labels = create_generated_labels(len(labels), ovulation_indices, fertility_indices, spike_indices, period_indices)
     display_labels(labels, generated_labels, window_size)
     # 198-219 is fishy, no period - because of a 1 week gap in the data which causes misalignment
     # dates[211] = 12/2 and dates[212] = 12/9
     match, total = 0, 0
-    for truth, generated in zip(labels[window_size:198], generated_labels[window_size:198]):
+    for i, (truth, generated) in enumerate(zip(labels[window_size:198], generated_labels[window_size:198])):
         total += 1
-        if truth == generated or (truth == 'period' and generated == 'follicular'):
+        if (truth == generated) or (truth == 'period' and generated == 'follicular') or (truth == 'follicular' and generated == 'period'):
             match += 1
         else:
-            print(f"mismatch: {truth} {generated}")
+            print(f"Day {i} mismatch: {truth} {generated}")
     print(f"{match} matches on the range of {total} for accuracy of {match/total}")
 
 
     # Compute accuracy
     luteal_accuracy, luteal_total_correct, luteal_total_considered = compute_accuracy(labels, set(spike_indices), warmup_period=window_size)
-    ovulation_accuracy, ovulation_total_correct, ovulation_total_considered = compute_ovulation_accuracy(labels, set(ovulation_indices), warmup_period=window_size)
+    ovulation_accuracy, ovulation_total_correct, ovulation_total_considered = compute_ovulation_accuracy(labels, set(ovulation_indices[:7]), warmup_period=window_size)
     fertility_accuracy, fertility_total_correct, fertility_total_considered = compute_fertility_accuracy(labels, set(fertility_indices), warmup_period=window_size)
     print(f"Luteal accuracy is f{luteal_accuracy}")
     print(f"Ovulation accuracy is f{ovulation_accuracy}")
