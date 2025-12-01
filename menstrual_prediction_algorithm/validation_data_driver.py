@@ -3,7 +3,7 @@ import ast
 import matplotlib.pyplot as plt
 from datetime import date
 
-from data_processing import compute_spiked_prediction_accuracy, compute_weighted_window_spiked_prediction_accuracy, compute_weighted_window_period_adjusting_spiked_prediction_accuracy
+from data_processing_utils import compute_spiked_prediction_accuracy, compute_weighted_window_spiked_prediction_accuracy, compute_weighted_window_period_adjusting_spiked_prediction_accuracy
 
 # Parse data per participant (each is a dictionary of lists)
 def load_processed_data(
