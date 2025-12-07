@@ -37,8 +37,8 @@ def main() -> None:
             compute_weighted_window_period_adjusting_spiked_prediction_with_ovulation_accuracy(
                 temp_data,
                 labels,
-                visualize=False,
-                generate_labels=True
+                visualize=True,
+                generate_labels=False
             )
         )
     except Exception as e:
